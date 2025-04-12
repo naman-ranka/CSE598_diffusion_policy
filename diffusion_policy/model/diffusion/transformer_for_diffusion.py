@@ -293,23 +293,23 @@ class TransformerForDiffusion(ModuleAttrMixin):
         cond: (B,T',cond_dim)
         output: (B,T,input_dim)
         """
-        # 1. time
-        timesteps = timestep
+        # Ensure timesteps is properly initialized
         if not torch.is_tensor(timesteps):
-            # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
             timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
         elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(sample.device)
-        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timesteps = timesteps.expand(sample.shape[0])
-        time_emb = self.time_emb(timesteps)
-
-        # *** MODIFICATION HERE: Keep time_emb in [B, n_emb] shape for AdaLayerNorm ***
-        batch_time_emb = time_emb
-        # Create a version with sequence dim [B, 1, n_emb] if needed for concatenation etc.
-        time_emb = time_emb.unsqueeze(1)
-
         
+        # Get time embeddings and ensure they're not None
+        time_emb = self.time_emb(timesteps)
+        if time_emb is None:
+            raise ValueError("Time embeddings cannot be None")
+            
+        # Store the original time embedding for AdaLayerNorm
+        batch_time_emb = time_emb.clone()
+        
+        # Add sequence dimension for attention
+        time_emb = time_emb.unsqueeze(1)
 
         # process input
         input_emb = self.input_emb(sample)
@@ -339,6 +339,8 @@ class TransformerForDiffusion(ModuleAttrMixin):
                 :, :tc, :
             ]  # each position maps to a (learnable) vector
             x = self.drop(cond_embeddings + position_embeddings)
+            if self.encoder is None:
+                raise ValueError("Encoder is not initialized. Check the configuration of T_cond and n_cond_layers.")
             x = self.encoder(x)
             memory = x
             # (B,T_cond,n_emb)
@@ -351,12 +353,15 @@ class TransformerForDiffusion(ModuleAttrMixin):
             ]  # each position maps to a (learnable) vector
             x = self.drop(token_embeddings + position_embeddings)
             # (B,T,n_emb)
-            x = self.decoder(
-                tgt=x,
-                memory=memory,
-                tgt_mask=self.mask,
-                memory_mask=self.memory_mask
-            )
+            if self.decoder is not None:
+                x = self.decoder(
+                    tgt=x,
+                    memory=memory,
+                    tgt_mask=self.mask,
+                    memory_mask=self.memory_mask
+                )
+            else:
+                raise ValueError("Decoder is not initialized. Check the configuration of T_cond and n_cond_layers.")
             # (B,T,n_emb)
         
         # head

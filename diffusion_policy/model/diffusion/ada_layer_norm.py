@@ -12,33 +12,34 @@ class AdaLayerNorm(nn.Module):
     """
     
     def __init__(self, feature_dim, time_emb_dim=None, eps=1e-5):
-        """
-        Initialize AdaLayerNorm.
-        
-        Args:
-            feature_dim: Dimension of the input features to normalize
-            time_emb_dim: Dimension of the time embedding input to the MLP.
-                           If None, use feature_dim.
-            eps: Small constant for numerical stability
-        """
         super().__init__()
         
-        # Layer norm without affine parameters (since we'll generate them adaptively)
+        self.feature_dim = feature_dim
+        self.eps = eps
+        
+        # Layer norm without affine parameters
         self.norm = nn.LayerNorm(feature_dim, elementwise_affine=False, eps=eps)
         
         # If time_emb_dim is not specified, use feature_dim
-        if time_emb_dim is None:
-            time_emb_dim = feature_dim
+        self.time_emb_dim = feature_dim if time_emb_dim is None else time_emb_dim
             
         # MLP to project time embeddings to modulation parameters
-        # Ensure the input dimension matches the time embedding dimension
         self.time_mlp = nn.Sequential(
-            nn.Linear(time_emb_dim, 4 * feature_dim), # Input dim is time_emb_dim
+            nn.Linear(self.time_emb_dim, 4 * feature_dim),
             nn.SiLU(),
-            nn.Linear(4 * feature_dim, 2 * feature_dim)  # 2x for scale and shift
+            nn.Linear(4 * feature_dim, 2 * feature_dim)
         )
         
-        self.feature_dim = feature_dim
+        # Initialize weights
+        self._reset_parameters()
+    
+    def _reset_parameters(self):
+        # Initialize the MLP weights
+        for module in self.time_mlp:
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
         
     def forward(self, x, time_emb):
         """
