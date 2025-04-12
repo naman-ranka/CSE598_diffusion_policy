@@ -194,13 +194,18 @@ class TransformerForDiffusion(ModuleAttrMixin):
             # no param
             pass
         
+        elif isinstance(module, nn.LayerNorm):
+             # Check if weight and bias exist (they won't if elementwise_affine=False)
+             if module.bias is not None:
+                 torch.nn.init.zeros_(module.bias)
+             if module.weight is not None:
+                 torch.nn.init.ones_(module.weight)
         
         elif isinstance(module, AdaLayerNorm):
              # Initialize the linear layers within its time_mlp
              logger.debug(f"Initializing AdaLayerNorm MLP weights for {module}")
              for layer in module.time_mlp:
                  if isinstance(layer, nn.Linear):
-                     logger.debug(f"Initializing Linear layer in AdaLayerNorm MLP: {layer}")
                      torch.nn.init.normal_(layer.weight, mean=0.0, std=0.02)
                      if layer.bias is not None:
                          torch.nn.init.zeros_(layer.bias)
@@ -223,6 +228,11 @@ class TransformerForDiffusion(ModuleAttrMixin):
         blacklist_weight_modules = (torch.nn.LayerNorm, torch.nn.Embedding)
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
+
+                if not p.requires_grad:
+                    continue
+
+
                 fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
 
                 is_in_adaln_mlp = '.ln_f.time_mlp.' in fpn # Check specifically for self.ln_f
@@ -247,7 +257,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
             no_decay.add("cond_pos_emb")
 
         # validate that we considered every parameter
-        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert (
