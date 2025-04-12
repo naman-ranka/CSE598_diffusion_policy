@@ -167,6 +167,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
             nn.Sequential,
             AdaLayerNorm,)
         if isinstance(module, (nn.Linear, nn.Embedding)):
+            print(f"DEBUG: Initializing bias for Linear: {module}") # ADD PRINT
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if isinstance(module, nn.Linear) and module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
@@ -184,6 +185,14 @@ class TransformerForDiffusion(ModuleAttrMixin):
                 if bias is not None:
                     torch.nn.init.zeros_(bias)
         elif isinstance(module, nn.LayerNorm):
+             # Check if weight and bias exist (they won't if elementwise_affine=False)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+            if module.weight is not None:
+                torch.nn.init.ones_(module.weight)
+        
+        elif isinstance(module, nn.LayerNorm):
+            print(f"DEBUG: Initializing bias for LayerNorm: {module}") # ADD PRINT
             torch.nn.init.zeros_(module.bias)
             torch.nn.init.ones_(module.weight)
         elif isinstance(module, TransformerForDiffusion):
@@ -194,12 +203,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
             # no param
             pass
         
-        elif isinstance(module, nn.LayerNorm):
-             # Check if weight and bias exist (they won't if elementwise_affine=False)
-             if module.bias is not None:
-                 torch.nn.init.zeros_(module.bias)
-             if module.weight is not None:
-                 torch.nn.init.ones_(module.weight)
+        
         
         elif isinstance(module, AdaLayerNorm):
              # Initialize the linear layers within its time_mlp
