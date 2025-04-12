@@ -165,7 +165,9 @@ class TransformerForDiffusion(ModuleAttrMixin):
             nn.ModuleList,
             nn.Mish,
             nn.Sequential,
-            AdaLayerNorm,)
+            AdaLayerNorm,
+            nn.SiLU,
+        )
         if isinstance(module, (nn.Linear, nn.Embedding)):
             print(f"DEBUG: Initializing bias for Linear: {module}") # ADD PRINT
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
