@@ -45,7 +45,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
         self.input_emb = nn.Linear(input_dim, n_emb)
         self.pos_emb = nn.Parameter(torch.zeros(1, T, n_emb))
         self.drop = nn.Dropout(p_drop_emb)
-        self.time_emb = SinusoidalPosEmb(n_emb)
+
         # cond encoder
         self.time_emb = SinusoidalPosEmb(n_emb)
         self.cond_obs_emb = None
@@ -135,10 +135,10 @@ class TransformerForDiffusion(ModuleAttrMixin):
                 self.memory_mask = None
         else:
             self.mask = None
-            self.memory_mask = None
-
-        # decoder head
-        self.ln_f = AdaLayerNorm(feature_dim=n_emb, time_emb_dim=n_emb)
+            self.memory_mask = None        # decoder head
+        # Using AdaLayerNorm instead of standard LayerNorm
+        # This allows the normalization parameters to adapt based on the diffusion timestep
+        self.ln_f = AdaLayerNorm(n_emb)
         self.head = nn.Linear(n_emb, output_dim)
             
         # constants
@@ -164,8 +164,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
             nn.TransformerDecoder,
             nn.ModuleList,
             nn.Mish,
-            nn.Sequential,
-            AdaLayerNorm,)
+            nn.Sequential)
         if isinstance(module, (nn.Linear, nn.Embedding)):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if isinstance(module, nn.Linear) and module.bias is not None:
@@ -193,18 +192,6 @@ class TransformerForDiffusion(ModuleAttrMixin):
         elif isinstance(module, ignore_types):
             # no param
             pass
-        
-        
-        elif isinstance(module, AdaLayerNorm):
-             # Initialize the linear layers within its time_mlp
-             logger.debug(f"Initializing AdaLayerNorm MLP weights for {module}")
-             for layer in module.time_mlp:
-                 if isinstance(layer, nn.Linear):
-                     logger.debug(f"Initializing Linear layer in AdaLayerNorm MLP: {layer}")
-                     torch.nn.init.normal_(layer.weight, mean=0.0, std=0.02)
-                     if layer.bias is not None:
-                         torch.nn.init.zeros_(layer.bias)
-
         else:
             raise RuntimeError("Unaccounted module {}".format(module))
     
@@ -224,8 +211,6 @@ class TransformerForDiffusion(ModuleAttrMixin):
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
                 fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
-
-                is_in_adaln_mlp = '.ln_f.time_mlp.' in fpn # Check specifically for self.ln_f
 
                 if pn.endswith("bias"):
                     # all biases will not be decayed
@@ -302,14 +287,8 @@ class TransformerForDiffusion(ModuleAttrMixin):
             timesteps = timesteps[None].to(sample.device)
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timesteps = timesteps.expand(sample.shape[0])
-        time_emb = self.time_emb(timesteps)
-
-        # *** MODIFICATION HERE: Keep time_emb in [B, n_emb] shape for AdaLayerNorm ***
-        batch_time_emb = time_emb
-        # Create a version with sequence dim [B, 1, n_emb] if needed for concatenation etc.
-        time_emb = time_emb.unsqueeze(1)
-
-        
+        time_emb = self.time_emb(timesteps).unsqueeze(1)
+        # (B,1,n_emb)
 
         # process input
         input_emb = self.input_emb(sample)
@@ -360,7 +339,7 @@ class TransformerForDiffusion(ModuleAttrMixin):
             # (B,T,n_emb)
         
         # head
-        x = self.ln_f(x, time_emb=batch_time_emb)
+        x = self.ln_f(x)
         x = self.head(x)
         # (B,T,n_out)
         return x
